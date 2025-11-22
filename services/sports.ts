@@ -54,12 +54,28 @@ const getFullUrl = (path: string) => {
     return `${SITE_BASE}${path}`;
 };
 
+// Generate a deterministic ID based on content if API ID is missing
+const generateStableId = (m: any): string => {
+    if (m.matchId) return m.matchId.toString();
+    if (m.id) return m.id.toString();
+    
+    // Fallback: Hash title + date
+    const str = `${m.title || ''}_${m.timestamp || ''}`;
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32bit integer
+    }
+    return `stable-${Math.abs(hash)}`;
+};
+
 const mapMatch = (m: any): SportsMatch => {
     const home = m.teams?.home;
     const away = m.teams?.away;
     
     return {
-        id: m.matchId || m.id || `match-${Math.random().toString(36).substr(2, 9)}`,
+        id: generateStableId(m),
         title: m.title || 'Unknown Match',
         date: (m.timestamp || 0) * 1000, 
         category: m.sport ? (typeof m.sport === 'string' ? m.sport.toUpperCase() : 'SPORTS') : 'SPORTS',

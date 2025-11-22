@@ -18,12 +18,27 @@ export const SPORTS_CATEGORIES = [
     'hockey', 'fight', 'tennis', 'cricket', 'rugby', 'motor-sports'
 ];
 
+// Fetch with timeout helper
+const fetchWithTimeout = async (url: string, options = {}, timeout = 8000) => {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+        const response = await fetch(url, { ...options, signal: controller.signal });
+        clearTimeout(id);
+        return response;
+    } catch (error) {
+        clearTimeout(id);
+        throw error;
+    }
+};
+
 // Helper to fetch with fallback strategy
 const fetchApi = async (url: string) => {
     for (const proxyGen of PROXIES) {
         try {
             const proxiedUrl = proxyGen(url);
-            const res = await fetch(proxiedUrl);
+            // Use timeout to fail fast on bad proxies
+            const res = await fetchWithTimeout(proxiedUrl, {}, 5000);
             if (res.ok) return await res.json();
         } catch (proxyErr) {
             // Continue to next proxy

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Trophy, Calendar, PlayCircle, Clock, Zap, Loader2, Filter, Bell, BellRing, RadioReceiver } from 'lucide-react';
 import { getMatches, SPORTS_CATEGORIES } from '../services/sports';
 import { SportsMatch } from '../types';
@@ -60,45 +60,52 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
   const [activeCategory, setActiveCategory] = useState('ALL');
   const [notifiedMatches, setNotifiedMatches] = useState<string[]>([]);
   
-  // Track loaded IDs to prevent duplicates during incremental load
-  const [loadedIds] = useState(new Set<string>());
+  // Use Ref to track IDs to avoid state dependency loops in effect
+  const loadedIds = useRef(new Set<string>());
 
   useEffect(() => {
     let mounted = true;
+    loadedIds.current.clear();
+    setMatches([]);
+    setLoading(true);
 
-    const loadData = async () => {
-        setLoading(true);
-        setMatches([]);
-        loadedIds.clear();
-
-        // 1. Load Football Priority (Instant Paint)
-        const footballData = await getMatches('football');
-        if (mounted && footballData.length > 0) {
-            footballData.forEach(m => loadedIds.add(m.id));
-            setMatches(footballData);
-            setLoading(false); // Stop spinner immediately
-        }
-
-        // 2. Load rest in background
-        const remainingSports = SPORTS_CATEGORIES.filter(s => s !== 'football');
-        
-        // Process in small batches to not choke the browser/network
-        for (const sport of remainingSports) {
-            if (!mounted) break;
-            getMatches(sport).then(data => {
+    const loadAllSports = async () => {
+        // 1. Define fetch handler
+        const fetchSport = async (sport: string) => {
+            if (!mounted) return;
+            try {
+                const data = await getMatches(sport);
                 if (!mounted) return;
-                setMatches(prev => {
-                    const uniqueNew = data.filter(m => !loadedIds.has(m.id));
-                    uniqueNew.forEach(m => loadedIds.add(m.id));
-                    if (uniqueNew.length === 0) return prev;
-                    return [...prev, ...uniqueNew].sort((a, b) => a.date - b.date);
-                });
-                if (matches.length === 0) setLoading(false);
-            });
-        }
+                
+                if (data && data.length > 0) {
+                    setMatches(prev => {
+                        const unique = data.filter(m => !loadedIds.current.has(m.id));
+                        unique.forEach(m => loadedIds.current.add(m.id));
+                        if (unique.length === 0) return prev;
+                        return [...prev, ...unique].sort((a, b) => a.date - b.date);
+                    });
+                    // Turn off loading as soon as we have ANY data
+                    setLoading(false);
+                }
+            } catch (e) {
+                console.warn(`Failed to load ${sport}`, e);
+            }
+        };
+
+        // 2. Fire Football first (prioritize request)
+        fetchSport('football');
+
+        // 3. Fire others slightly staggered or parallel
+        const others = SPORTS_CATEGORIES.filter(s => s !== 'football');
+        others.forEach(sport => fetchSport(sport));
+
+        // 4. Safety fallback: Ensure loading state turns off eventually even if everything fails
+        setTimeout(() => {
+            if (mounted) setLoading(false);
+        }, 4000);
     };
 
-    loadData();
+    loadAllSports();
     
     return () => { mounted = false; };
   }, []);

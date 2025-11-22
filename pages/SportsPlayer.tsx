@@ -31,7 +31,8 @@ export const SportsPlayer: React.FC<SportsPlayerProps> = ({ match, onBack }) => 
   };
 
   return (
-    <div className="h-screen w-screen bg-black flex flex-col overflow-hidden animate-fade-in">
+    // Fixed position with high z-index ensures it sits atop everything and ignores parent layout constraints
+    <div className="fixed inset-0 z-50 bg-black flex flex-col overflow-hidden animate-fade-in">
       {/* Header */}
       <div className="bg-[var(--bg-card)] border-b border-[var(--border-color)] px-4 py-3 flex items-center gap-4 z-20 shrink-0">
         <button 
@@ -55,8 +56,11 @@ export const SportsPlayer: React.FC<SportsPlayerProps> = ({ match, onBack }) => 
 
       <div className="flex-1 flex flex-col lg:flex-row min-h-0">
         {/* Player Container */}
-        <div className="flex-1 bg-black relative order-1 lg:order-1 flex flex-col">
-             {/* Mobile: Aspect Ratio wrapper to keep video correct size at top. Desktop: Full fill */}
+        <div className="flex-1 bg-black relative order-1 lg:order-1 flex flex-col justify-center">
+            {/* 
+               Mobile: aspect-video keeps it sized correctly at the top/center. 
+               Desktop: h-full w-full absolute inset-0 ensures it fills the flex area without scrolling.
+            */}
             <div className="relative w-full aspect-video lg:aspect-auto lg:h-full bg-black group">
                 {activeStream ? (
                     !streamError ? (

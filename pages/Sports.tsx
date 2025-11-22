@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Trophy, Calendar, PlayCircle, Clock, Zap, Loader2, Filter, Bell, BellRing, RadioReceiver } from 'lucide-react';
-import { getAllMatches } from '../services/sports';
+import { getMatches, SPORTS_CATEGORIES } from '../services/sports';
 import { SportsMatch } from '../types';
 
 interface SportsProps {
@@ -12,7 +12,6 @@ interface SportsProps {
 const TeamLogo: React.FC<{ name: string, logo?: string, className?: string }> = React.memo(({ name, logo, className = "w-12 h-12" }) => {
     const [imgError, setImgError] = useState(false);
 
-    // Generate a consistent color based on the name (Fallback)
     const getColor = (str: string) => {
         let hash = 0;
         for (let i = 0; i < str.length; i++) {
@@ -37,7 +36,6 @@ const TeamLogo: React.FC<{ name: string, logo?: string, className?: string }> = 
         );
     }
 
-    // Fallback: Initials
     const initials = name.split(' ')
         .map(n => n[0])
         .slice(0, 2)
@@ -61,23 +59,48 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState('ALL');
   const [notifiedMatches, setNotifiedMatches] = useState<string[]>([]);
+  
+  // Track loaded IDs to prevent duplicates during incremental load
+  const [loadedIds] = useState(new Set<string>());
 
   useEffect(() => {
-    const loadMatches = async () => {
-      try {
-        const data = await getAllMatches();
-        setMatches(data);
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setLoading(false);
-      }
+    let mounted = true;
+
+    const loadData = async () => {
+        setLoading(true);
+        setMatches([]);
+        loadedIds.clear();
+
+        // 1. Load Football Priority (Instant Paint)
+        const footballData = await getMatches('football');
+        if (mounted && footballData.length > 0) {
+            footballData.forEach(m => loadedIds.add(m.id));
+            setMatches(footballData);
+            setLoading(false); // Stop spinner immediately
+        }
+
+        // 2. Load rest in background
+        const remainingSports = SPORTS_CATEGORIES.filter(s => s !== 'football');
+        
+        // Process in small batches to not choke the browser/network
+        for (const sport of remainingSports) {
+            if (!mounted) break;
+            getMatches(sport).then(data => {
+                if (!mounted) return;
+                setMatches(prev => {
+                    const uniqueNew = data.filter(m => !loadedIds.has(m.id));
+                    uniqueNew.forEach(m => loadedIds.add(m.id));
+                    if (uniqueNew.length === 0) return prev;
+                    return [...prev, ...uniqueNew].sort((a, b) => a.date - b.date);
+                });
+                if (matches.length === 0) setLoading(false);
+            });
+        }
     };
-    loadMatches();
+
+    loadData();
     
-    // Auto-refresh every 5 minutes
-    const interval = setInterval(loadMatches, 300000);
-    return () => clearInterval(interval);
+    return () => { mounted = false; };
   }, []);
 
   // Filtering & Logic
@@ -89,8 +112,9 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
         ? matches 
         : matches.filter(m => m.category.toUpperCase() === activeCategory);
 
-    // 2. Sort by popularity/time
+    // 2. Sort
     filtered.sort((a, b) => {
+        // Priority to Popular matches
         if (a.popular && !b.popular) return -1;
         if (!a.popular && b.popular) return 1;
         return a.date - b.date;
@@ -101,11 +125,7 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
 
     filtered.forEach(m => {
         const diff = m.date - now;
-        // Check status from API or fallback to time-based logic
-        // API status 'in' usually means in-play. 'live' is also possible.
         const isLiveStatus = m.status && (['in', 'live', '1'].includes(m.status.toLowerCase()));
-        
-        // Time buffer: Live if started recently (within 3 hours) or starts very soon (15 mins)
         const isLiveTime = diff < 15 * 60 * 1000 && diff > -3 * 60 * 60 * 1000;
 
         if (isLiveStatus || isLiveTime) {
@@ -118,21 +138,17 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
     return { liveMatches: live, upcomingMatches: upcoming };
   }, [matches, activeCategory]);
 
-  // Extract & Prioritize Categories
   const categories = useMemo(() => {
     const cats = Array.from(new Set(matches.map(m => m.category.toUpperCase()))) as string[];
     const priority = ['FOOTBALL', 'FIGHT', 'MOTORSPORT', 'BASKETBALL', 'TENNIS', 'BASEBALL'];
-
     cats.sort((a, b) => {
         const idxA = priority.indexOf(a);
         const idxB = priority.indexOf(b);
-        
         if (idxA !== -1 && idxB !== -1) return idxA - idxB;
         if (idxA !== -1) return -1;
         if (idxB !== -1) return 1;
         return a.localeCompare(b);
     });
-
     return ['ALL', ...cats];
   }, [matches]);
 
@@ -142,34 +158,25 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
           alert("This browser does not support notifications.");
           return;
       }
-
       if (Notification.permission === "granted") {
           scheduleNotification(match);
       } else if (Notification.permission !== "denied") {
           Notification.requestPermission().then(permission => {
-              if (permission === "granted") {
-                  scheduleNotification(match);
-              }
+              if (permission === "granted") scheduleNotification(match);
           });
       }
   };
 
   const scheduleNotification = (match: SportsMatch) => {
-      const now = Date.now();
-      const diff = match.date - now;
-      
+      setNotifiedMatches(prev => [...prev, match.title]);
+      const diff = match.date - Date.now();
       if (diff > 0) {
-          setNotifiedMatches(prev => [...prev, match.title]);
-          
-          // Notify 5 mins before if possible, else immediately if close
-          const timeout = Math.max(0, diff - (5 * 60 * 1000)); 
-          
           setTimeout(() => {
               new Notification("Match Starting Soon!", {
                   body: `${match.title} is starting in 5 minutes!`,
                   icon: "https://cdn-icons-png.flaticon.com/512/4221/4221484.png"
               });
-          }, timeout);
+          }, Math.max(0, diff - (5 * 60 * 1000)));
       }
   };
 
@@ -180,7 +187,6 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
       const isNotified = notifiedMatches.includes(match.title);
       const [posterFailed, setPosterFailed] = useState(false);
 
-      // 1. POSTER LAYOUT (Featured Events / UFC / Boxing)
       if (match.poster && !posterFailed) {
         return (
             <div 
@@ -191,7 +197,6 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
                         : ''
                 }`}
             >
-                {/* Background Image */}
                 <div className="absolute inset-0">
                     <img 
                         src={match.poster} 
@@ -205,9 +210,7 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
                     <div className="absolute inset-0 bg-gradient-to-b from-black/60 to-transparent opacity-60"></div>
                 </div>
 
-                {/* Content Overlay */}
                 <div className="absolute inset-0 p-4 flex flex-col justify-between z-10">
-                    {/* Top Bar */}
                     <div className="flex justify-between items-start">
                         <span className="bg-black/40 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded border border-white/10 uppercase tracking-wider">
                             {match.category}
@@ -219,17 +222,14 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
                         )}
                     </div>
 
-                    {/* Bottom Info */}
                     <div className="mt-auto">
                         <h3 className="text-white font-black text-xl md:text-2xl leading-none drop-shadow-lg text-center mb-3 uppercase italic">
                             {match.title}
                         </h3>
-                        
                         <div className="flex items-center justify-between border-t border-white/10 pt-3">
                             <span className="text-xs font-bold text-gray-200 shadow-black drop-shadow-md">
                                 {isLive ? 'Streaming Now' : `${dateStr} • ${timeStr}`}
                             </span>
-
                             {isLive ? (
                                 <button className="bg-[rgb(var(--primary-color))] text-white px-4 py-1.5 rounded-full text-xs font-bold hover:scale-105 transition-transform shadow-lg shadow-[rgb(var(--primary-color))]/20 flex items-center gap-1">
                                     <PlayCircle className="w-3.5 h-3.5" /> Watch
@@ -250,7 +250,6 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
         );
       }
 
-      // 2. STANDARD MATCH CARD (Teams / Football / etc)
       return (
         <div 
             onClick={() => isLive && onPlay(match)}
@@ -261,7 +260,6 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
             }`}
         >
             <div className="p-3 sm:p-4 flex flex-col h-full gap-3">
-                {/* Header */}
                 <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider">
                     <div className="flex items-center gap-2">
                          <span className="text-[var(--text-muted)] bg-[var(--bg-input)] px-1.5 py-0.5 rounded border border-[var(--border-color)]">
@@ -269,7 +267,6 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
                          </span>
                          {match.league && <span className="text-[var(--text-muted)] opacity-70">{match.league}</span>}
                     </div>
-                    
                     {isLive ? (
                         <span className="text-red-500 flex items-center gap-1 animate-pulse">
                             <span className="w-1.5 h-1.5 bg-red-500 rounded-full"></span> LIVE
@@ -279,7 +276,6 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
                     )}
                 </div>
 
-                {/* Teams */}
                 <div className="flex items-center justify-between gap-2">
                     {match.teams?.home && match.teams?.away ? (
                         <>
@@ -289,9 +285,7 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
                                     {match.teams.home.name}
                                 </span>
                             </div>
-                            
                             <div className="text-[var(--text-muted)] font-black text-xs opacity-30 pb-4">VS</div>
-
                             <div className="flex-1 flex flex-col items-center text-center gap-2 min-w-0">
                                 <TeamLogo name={match.teams.away.name} logo={match.teams.away.logo} className="w-12 h-12 text-base" />
                                 <span className={`text-xs font-bold leading-tight line-clamp-2 ${isLive ? 'text-[var(--text-main)]' : 'text-[var(--text-muted)]'}`}>
@@ -304,12 +298,10 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
                     )}
                 </div>
 
-                {/* Footer Action */}
                 <div className="pt-3 border-t border-[var(--border-color)] flex items-center justify-between">
                      <span className="text-[10px] text-[var(--text-muted)] font-mono flex items-center gap-1">
                         <RadioReceiver className="w-3 h-3" /> {match.streams.length} Stream{match.streams.length !== 1 ? 's' : ''}
                      </span>
-                     
                      {isLive ? (
                          <button className="bg-[var(--text-main)] text-[var(--bg-main)] px-3 py-1 rounded text-xs font-bold flex items-center gap-1 hover:opacity-90">
                             <PlayCircle className="w-3 h-3" /> Watch
@@ -332,8 +324,6 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 min-h-screen animate-fade-in">
-      
-      {/* Compact Header */}
       <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-3 w-full md:w-auto">
             <div className="bg-blue-600 p-2 rounded-lg shadow-lg shadow-blue-900/20 shrink-0">
@@ -345,7 +335,6 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
             </div>
         </div>
         
-        {/* Filter Pills */}
         <div className="w-full md:w-auto overflow-x-auto no-scrollbar">
             <div className="flex items-center gap-2">
                 <Filter className="w-4 h-4 text-[var(--text-muted)] shrink-0" />
@@ -366,7 +355,6 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
         </div>
       </div>
 
-      {/* Main Content */}
       {loading ? (
         <div className="flex flex-col items-center justify-center py-32">
             <Loader2 className="w-10 h-10 text-blue-500 animate-spin mb-4" />
@@ -379,7 +367,6 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
          </div>
       ) : (
          <div className="space-y-8">
-            {/* Live Section */}
             {liveMatches.length > 0 && (
                 <div>
                     <div className="flex items-center gap-2 mb-4 px-1">
@@ -397,7 +384,6 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
                 </div>
             )}
 
-            {/* Upcoming Section */}
             {upcomingMatches.length > 0 && (
                 <div>
                      <div className="flex items-center gap-2 mb-4 px-1 mt-8 pt-8 border-t border-[var(--border-color)]">
@@ -413,12 +399,6 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
                         ))}
                     </div>
                 </div>
-            )}
-
-            {liveMatches.length === 0 && upcomingMatches.length === 0 && (
-                 <div className="text-center py-12 text-[var(--text-muted)]">
-                    <p>No active matches for this category.</p>
-                 </div>
             )}
          </div>
       )}

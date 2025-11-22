@@ -3,29 +3,23 @@ import { SportsMatch, SportsStream } from '../types';
 
 const API_BASE = 'https://watchfooty.st/api/v1';
 const SITE_BASE = 'https://watchfooty.st';
+const CACHE_DURATION = 5 * 60 * 1000; // 5 Minutes
 
-// List of proxies to try in order if direct fetch fails
+// List of proxies to try in order
 const PROXIES = [
     // 1. Local Vercel Proxy (Most reliable/fastest)
     (url: string) => `/api/proxy?url=${encodeURIComponent(url)}`,
-    // 2. Fallbacks
-    (url: string) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-    (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
+    // 2. Fallback
+    (url: string) => `https://corsproxy.io/?${encodeURIComponent(url)}`
+];
+
+export const SPORTS_CATEGORIES = [
+    'football', 'basketball', 'american-football', 'baseball', 
+    'hockey', 'fight', 'tennis', 'cricket', 'rugby', 'motor-sports'
 ];
 
 // Helper to fetch with fallback strategy
 const fetchApi = async (url: string) => {
-    // 1. Try Direct fetch first (some APIs allow CORS or might work with no-referrer)
-    try {
-        const directRes = await fetch(url, { referrerPolicy: 'no-referrer' });
-        if (directRes.ok) return await directRes.json();
-        // If 403 or other error, throw to trigger proxy fallback
-        if (directRes.status === 403 || directRes.status === 401) throw new Error('Direct access forbidden');
-    } catch (e) {
-        // Ignore direct failure, proceed to proxies
-    }
-
-    // 2. Try Proxies in order
     for (const proxyGen of PROXIES) {
         try {
             const proxiedUrl = proxyGen(url);
@@ -35,7 +29,6 @@ const fetchApi = async (url: string) => {
             // Continue to next proxy
         }
     }
-
     console.warn(`All fetch attempts failed for ${url}`);
     return null;
 };
@@ -47,17 +40,13 @@ const getFullUrl = (path: string) => {
 };
 
 const mapMatch = (m: any): SportsMatch => {
-    // Robust check for nested properties to prevent "Cannot read properties of undefined"
     const home = m.teams?.home;
     const away = m.teams?.away;
     
-    // Determine valid status
-    const isLive = m.status === 'in' || m.status === 'live' || m.status === '1' || m.status === 1;
-
     return {
         id: m.matchId || m.id || `match-${Math.random().toString(36).substr(2, 9)}`,
         title: m.title || 'Unknown Match',
-        date: (m.timestamp || 0) * 1000, // API returns seconds, JS needs ms
+        date: (m.timestamp || 0) * 1000, 
         category: m.sport ? (typeof m.sport === 'string' ? m.sport.toUpperCase() : 'SPORTS') : 'SPORTS',
         league: m.league || '',
         poster: getFullUrl(m.poster),
@@ -86,58 +75,53 @@ const mapMatch = (m: any): SportsMatch => {
     };
 };
 
-export const getAllMatches = async (): Promise<SportsMatch[]> => {
-  try {
-    // 1. Fetch available sports dynamically
-    let sportsList: { name: string }[] = [];
+export const getMatches = async (sport: string): Promise<SportsMatch[]> => {
+    const cacheKey = `streamhub_sports_${sport}`;
+    
+    // 1. Check Cache
     try {
-        const sportsData = await fetchApi(`${API_BASE}/sports`);
-        if (Array.isArray(sportsData)) {
-            sportsList = sportsData;
+        const cached = sessionStorage.getItem(cacheKey);
+        if (cached) {
+            const { timestamp, data } = JSON.parse(cached);
+            if (Date.now() - timestamp < CACHE_DURATION) {
+                return data;
+            }
+        }
+    } catch (e) { /* Ignore */ }
+
+    // 2. Fetch
+    try {
+        const data = await fetchApi(`${API_BASE}/matches/${sport}`);
+        if (Array.isArray(data)) {
+            const validMatches = data.map(item => {
+                try { return mapMatch(item); } catch (err) { return null; }
+            }).filter(m => m !== null) as SportsMatch[];
+
+            // Sort by date
+            validMatches.sort((a, b) => a.date - b.date);
+
+            // 3. Update Cache
+            try {
+                sessionStorage.setItem(cacheKey, JSON.stringify({
+                    timestamp: Date.now(),
+                    data: validMatches
+                }));
+            } catch (e) {}
+
+            return validMatches;
         }
     } catch (e) {
-        console.warn("Failed to fetch sports list, using defaults");
+        console.error(`Failed to fetch ${sport}:`, e);
     }
-
-    // Fallback defaults if API list fails or is empty
-    if (!sportsList || sportsList.length === 0) {
-        sportsList = [
-            { name: 'football' }, { name: 'basketball' }, { name: 'american-football' }, 
-            { name: 'baseball' }, { name: 'hockey' }, { name: 'fight' }, 
-            { name: 'motor-sports' }, { name: 'tennis' }, { name: 'cricket' }, { name: 'rugby' }
-        ];
-    }
-
-    // Filter out invalid entries
-    const validSports = sportsList.filter(s => s && typeof s.name === 'string');
-
-    // 2. Fetch matches for all sports in parallel
-    const promises = validSports.map(sport => fetchApi(`${API_BASE}/matches/${sport.name}`));
-    const results = await Promise.all(promises);
     
-    let allMatches: SportsMatch[] = [];
-    
-    results.forEach(data => {
-        if (Array.isArray(data)) {
-            // Map safely, filtering out items that crash the mapper
-            const validMatches = data.map(item => {
-                try {
-                    return mapMatch(item);
-                } catch (err) {
-                    return null;
-                }
-            }).filter(m => m !== null) as SportsMatch[];
-            
-            allMatches = [...allMatches, ...validMatches];
-        }
-    });
-
-    // Sort by date
-    return allMatches.sort((a, b) => a.date - b.date);
-  } catch (e) {
-    console.error("Failed to fetch matches:", e);
     return [];
-  }
+};
+
+// Keep for compatibility if needed, but UI should use getMatches incrementally
+export const getAllMatches = async (): Promise<SportsMatch[]> => {
+    const promises = SPORTS_CATEGORIES.map(s => getMatches(s));
+    const results = await Promise.all(promises);
+    return results.flat().sort((a, b) => a.date - b.date);
 };
 
 export const getMatchStreams = async (source: string, id: string): Promise<SportsStream[]> => {

@@ -31,9 +31,9 @@ export const SportsPlayer: React.FC<SportsPlayerProps> = ({ match, onBack }) => 
   };
 
   return (
-    <div className="min-h-screen bg-black flex flex-col animate-fade-in">
+    <div className="h-screen w-screen bg-black flex flex-col overflow-hidden animate-fade-in">
       {/* Header */}
-      <div className="bg-[var(--bg-card)] border-b border-[var(--border-color)] px-4 py-3 flex items-center gap-4 z-20">
+      <div className="bg-[var(--bg-card)] border-b border-[var(--border-color)] px-4 py-3 flex items-center gap-4 z-20 shrink-0">
         <button 
           onClick={onBack} 
           className="p-2 hover:bg-[var(--bg-hover)] rounded-full text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
@@ -53,17 +53,18 @@ export const SportsPlayer: React.FC<SportsPlayerProps> = ({ match, onBack }) => 
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col lg:flex-row h-full overflow-hidden">
+      <div className="flex-1 flex flex-col lg:flex-row min-h-0">
         {/* Player Container */}
-        <div className="flex-1 bg-black flex flex-col relative order-1 lg:order-1 justify-start">
-            <div className="relative w-full lg:h-full flex items-center justify-center aspect-video lg:aspect-auto bg-black group">
+        <div className="flex-1 bg-black relative order-1 lg:order-1 flex flex-col">
+             {/* Mobile: Aspect Ratio wrapper to keep video correct size at top. Desktop: Full fill */}
+            <div className="relative w-full aspect-video lg:aspect-auto lg:h-full bg-black group">
                 {activeStream ? (
                     !streamError ? (
                         <>
                             <iframe 
                                 key={activeStream.url} 
                                 src={activeStream.url} 
-                                className="w-full h-full absolute inset-0 z-10" 
+                                className="absolute inset-0 w-full h-full z-10" 
                                 frameBorder="0" 
                                 allowFullScreen 
                                 allow="autoplay; encrypted-media; picture-in-picture"
@@ -79,14 +80,14 @@ export const SportsPlayer: React.FC<SportsPlayerProps> = ({ match, onBack }) => 
                             )}
                         </>
                     ) : (
-                        <div className="text-center p-8">
+                         <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-8">
                             <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
                             <p className="text-white font-bold mb-2">Stream Connection Failed</p>
                             <p className="text-[var(--text-muted)] text-sm">Please select a different stream from the list.</p>
                         </div>
                     )
                 ) : (
-                    <div className="flex flex-col items-center justify-center p-8 text-center">
+                    <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center">
                          <MonitorPlay className="w-16 h-16 text-[var(--text-muted)] opacity-20 mb-4" />
                          <p className="text-[var(--text-muted)] text-sm">Select a stream to start watching</p>
                     </div>
@@ -95,7 +96,7 @@ export const SportsPlayer: React.FC<SportsPlayerProps> = ({ match, onBack }) => 
         </div>
 
         {/* Sidebar / Bottom Bar for Streams */}
-        <div className="bg-[var(--bg-card)] border-l border-[var(--border-color)] w-full lg:w-96 flex flex-col shrink-0 lg:h-full h-[40vh] lg:max-h-none order-2 lg:order-2 flex-grow-0">
+        <div className="bg-[var(--bg-card)] border-l border-[var(--border-color)] w-full lg:w-96 flex flex-col shrink-0 lg:h-full h-[40vh] order-2 lg:order-2 z-10">
             <div className="p-4 border-b border-[var(--border-color)] bg-[var(--bg-input)]/50 shrink-0">
                 <h3 className="font-bold text-[var(--text-main)] flex items-center gap-2">
                     <Zap className="w-4 h-4 text-[rgb(var(--primary-color))]" /> 
@@ -154,7 +155,7 @@ export const SportsPlayer: React.FC<SportsPlayerProps> = ({ match, onBack }) => 
                 )}
             </div>
             
-            <div className="p-3 border-t border-[var(--border-color)] bg-[var(--bg-input)]/30 text-[10px] text-[var(--text-muted)] flex items-center gap-2 justify-center">
+            <div className="p-3 border-t border-[var(--border-color)] bg-[var(--bg-input)]/30 text-[10px] text-[var(--text-muted)] flex items-center gap-2 justify-center shrink-0">
                 <ShieldCheck className="w-3 h-3 text-green-500" />
                 <span>Secure Connection</span>
             </div>

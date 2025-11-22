@@ -1,3 +1,4 @@
+
 {
   "rewrites": [
     {
@@ -5,7 +6,7 @@
       "destination": "/api/:path*"
     },
     {
-      "source": "/((?!api/|assets/|sw.js|manifest.json|favicon.ico).*)",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]

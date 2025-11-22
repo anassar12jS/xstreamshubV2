@@ -259,9 +259,6 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
   // Filtering Logic
   const { liveMatches, upcomingMatches, hasResults } = useMemo(() => {
     const now = Date.now();
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
-    const endOfDayTime = endOfDay.getTime();
     
     // 1. Filter by Category
     let filtered = activeCategory === 'ALL' 
@@ -296,8 +293,8 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
 
         if (isLiveStatus || isLiveTime) {
             live.push(m);
-        } else if (diff >= 15 * 60 * 1000 && m.date <= endOfDayTime) {
-            // Only add to upcoming if it is TODAY (before midnight)
+        } else if (diff >= 15 * 60 * 1000) {
+            // Show everything else in upcoming, no date limit
             upcoming.push(m);
         }
     }
@@ -430,7 +427,7 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
                     }`}
                  >
                     <Calendar className="w-3 h-3" />
-                    Upcoming Today ({upcomingMatches.length})
+                    Upcoming ({upcomingMatches.length})
                  </button>
             </div>
         </div>
@@ -508,7 +505,7 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
                         ) : (
                             <div className="text-center py-12 bg-[var(--bg-card)]/50 rounded-lg border border-[var(--border-color)] border-dashed">
                                  <Calendar className="w-8 h-8 mx-auto text-[var(--text-muted)] opacity-20 mb-2" />
-                                 <p className="text-xs text-[var(--text-muted)]">No more matches scheduled for today.</p>
+                                 <p className="text-xs text-[var(--text-muted)]">No matches scheduled.</p>
                             </div>
                         )}
                     </div>

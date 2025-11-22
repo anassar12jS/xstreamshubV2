@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Trophy, Calendar, PlayCircle, Bell, BellRing, RadioReceiver, Loader2, Filter, Search, RefreshCw, Clock, Zap } from 'lucide-react';
-import { getMatches, SPORTS_CATEGORIES } from '../services/sports';
+import { Trophy, Calendar, PlayCircle, Bell, BellRing, RadioReceiver, Loader2, Filter, Search, RefreshCw, Clock, Zap, ChevronRight } from 'lucide-react';
+import { getMatches, SPORTS_CATEGORIES, clearSportsCache } from '../services/sports';
 import { SportsMatch } from '../types';
 
 interface SportsProps {
@@ -241,9 +241,7 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
         // Fire all requests concurrently
         const promises = SPORTS_CATEGORIES.map(sport => fetchSport(sport));
         
-        // Wait for all to finish (settled) to turn off loading indicator completely
         await Promise.allSettled(promises);
-        
         if (mounted) setIsFetching(false);
   }, []);
 
@@ -283,9 +281,7 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
 
     // 3. Sort priority
     filtered.sort((a, b) => {
-        // Popular first
         if (a.popular !== b.popular) return a.popular ? -1 : 1;
-        // Then by date
         return a.date - b.date;
     });
 
@@ -355,6 +351,7 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
   }, []);
 
   const handleRetry = () => {
+      clearSportsCache(); // Force fresh data
       setRefreshCount(prev => prev + 1);
   };
 
@@ -410,29 +407,30 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
                 ))}
             </div>
 
-            {/* View Mode Tabs */}
-            <div className="flex bg-[var(--bg-card)] p-1 rounded-lg border border-[var(--border-color)] self-start">
+            {/* Filter Toggle (Live vs Upcoming) */}
+            <div className="flex items-center gap-2 pt-1">
                  <button 
                     onClick={() => setViewMode('live')}
-                    className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-[10px] font-bold transition-all ${
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-bold transition-all border ${
                         viewMode === 'live' 
-                        ? 'bg-[rgb(var(--primary-color))] text-white shadow-md' 
-                        : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
+                        ? 'bg-[rgb(var(--primary-color))] text-white border-[rgb(var(--primary-color))] shadow-md shadow-[rgb(var(--primary-color))]/20' 
+                        : 'bg-[var(--bg-card)] text-[var(--text-muted)] border-[var(--border-color)] hover:text-[var(--text-main)]'
                     }`}
                  >
                     <Zap className={`w-3 h-3 ${viewMode === 'live' ? 'fill-current' : ''}`} />
                     Live ({liveMatches.length})
                  </button>
+
                  <button 
                     onClick={() => setViewMode('upcoming')}
-                    className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-[10px] font-bold transition-all ${
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-bold transition-all border ${
                         viewMode === 'upcoming' 
-                        ? 'bg-[rgb(var(--primary-color))] text-white shadow-md' 
-                        : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
+                        ? 'bg-[rgb(var(--primary-color))] text-white border-[rgb(var(--primary-color))] shadow-md shadow-[rgb(var(--primary-color))]/20' 
+                        : 'bg-[var(--bg-card)] text-[var(--text-muted)] border-[var(--border-color)] hover:text-[var(--text-main)]'
                     }`}
                  >
                     <Calendar className="w-3 h-3" />
-                    Upcoming ({upcomingMatches.length})
+                    Upcoming Today ({upcomingMatches.length})
                  </button>
             </div>
         </div>
@@ -448,7 +446,7 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
                     onClick={handleRetry}
                     className="flex items-center gap-2 px-4 py-2 bg-[var(--bg-input)] hover:bg-[var(--bg-hover)] rounded-lg text-xs font-bold transition-colors"
                 >
-                    <RefreshCw className="w-3 h-3" /> Retry
+                    <RefreshCw className="w-3 h-3" /> Retry (Clear Cache)
                 </button>
              </div>
           ) : showFilteredEmptyState ? (
@@ -478,7 +476,14 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
                             <div className="text-center py-12 bg-[var(--bg-card)]/50 rounded-lg border border-[var(--border-color)] border-dashed">
                                 <Zap className="w-8 h-8 mx-auto text-[var(--text-muted)] opacity-20 mb-2" />
                                 <p className="text-xs text-[var(--text-muted)]">No live matches at the moment.</p>
-                                <p className="text-[9px] text-[var(--text-muted)] mt-1">Check the Upcoming tab for today's schedule.</p>
+                                <div className="mt-4">
+                                    <button 
+                                        onClick={() => setViewMode('upcoming')} 
+                                        className="inline-flex items-center gap-1 text-[10px] text-[rgb(var(--primary-color))] font-bold hover:underline"
+                                    >
+                                        Check Upcoming <ChevronRight className="w-3 h-3" />
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>

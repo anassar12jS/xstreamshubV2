@@ -3,7 +3,7 @@ import { SportsMatch, SportsStream } from '../types';
 
 const API_BASE = 'https://watchfooty.st/api/v1';
 const SITE_BASE = 'https://watchfooty.st';
-const CACHE_DURATION = 5 * 60 * 1000; // 5 Minutes
+const CACHE_DURATION = 30 * 60 * 1000; // 30 Minutes
 
 // List of proxies to try in order
 const PROXIES = [
@@ -38,7 +38,9 @@ const fetchApi = async (url: string) => {
         try {
             const proxiedUrl = proxyGen(url);
             // Use timeout to fail fast on bad proxies
-            const res = await fetchWithTimeout(proxiedUrl, {}, 5000);
+            const res = await fetchWithTimeout(proxiedUrl, {
+                headers: { 'Cache-Control': 'no-cache' }
+            }, 5000);
             if (res.ok) return await res.json();
         } catch (proxyErr) {
             // Continue to next proxy
@@ -108,12 +110,15 @@ const mapMatch = (m: any): SportsMatch => {
 
 export const getMatches = async (sport: string): Promise<SportsMatch[]> => {
     const cacheKey = `streamhub_sports_${sport}`;
-    
+    let cachedData = null;
+
     // 1. Check Cache
     try {
         const cached = sessionStorage.getItem(cacheKey);
         if (cached) {
             const { timestamp, data } = JSON.parse(cached);
+            cachedData = data;
+            // If cache is fresh, return immediately
             if (Date.now() - timestamp < CACHE_DURATION) {
                 return data;
             }
@@ -144,11 +149,23 @@ export const getMatches = async (sport: string): Promise<SportsMatch[]> => {
     } catch (e) {
         console.error(`Failed to fetch ${sport}:`, e);
     }
+
+    // 4. Fallback: If fetch failed, return expired cache if available (Stale-if-error)
+    if (cachedData) {
+        console.log(`Returning stale cache for ${sport} due to fetch failure.`);
+        return cachedData;
+    }
     
     return [];
 };
 
-// Keep for compatibility if needed, but UI should use getMatches incrementally
+// Force clear cache for a retry
+export const clearSportsCache = () => {
+    SPORTS_CATEGORIES.forEach(sport => {
+        sessionStorage.removeItem(`streamhub_sports_${sport}`);
+    });
+};
+
 export const getAllMatches = async (): Promise<SportsMatch[]> => {
     const promises = SPORTS_CATEGORIES.map(s => getMatches(s));
     const results = await Promise.all(promises);

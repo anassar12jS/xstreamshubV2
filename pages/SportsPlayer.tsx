@@ -55,8 +55,8 @@ export const SportsPlayer: React.FC<SportsPlayerProps> = ({ match, onBack }) => 
 
       <div className="flex-1 flex flex-col lg:flex-row h-full overflow-hidden">
         {/* Player Container */}
-        <div className="flex-1 bg-black flex flex-col relative order-1 lg:order-1">
-            <div className="relative w-full h-full flex items-center justify-center aspect-video lg:aspect-auto bg-black group">
+        <div className="flex-1 bg-black flex flex-col relative order-1 lg:order-1 justify-start">
+            <div className="relative w-full lg:h-full flex items-center justify-center aspect-video lg:aspect-auto bg-black group">
                 {activeStream ? (
                     !streamError ? (
                         <>

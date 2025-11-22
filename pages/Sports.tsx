@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Trophy, Calendar, PlayCircle, Bell, BellRing, RadioReceiver, Loader2, Filter, Search, RefreshCw, Clock } from 'lucide-react';
+import { Trophy, Calendar, PlayCircle, Bell, BellRing, RadioReceiver, Loader2, Filter, Search, RefreshCw, Clock, Zap } from 'lucide-react';
 import { getMatches, SPORTS_CATEGORIES } from '../services/sports';
 import { SportsMatch } from '../types';
 
@@ -206,14 +206,14 @@ const MatchCard: React.FC<{
 
 export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
   const [matches, setMatches] = useState<SportsMatch[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [isFetching, setIsFetching] = useState(true);
   const [activeCategory, setActiveCategory] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
-  const [showUpcoming, setShowUpcoming] = useState(false);
+  const [viewMode, setViewMode] = useState<'live' | 'upcoming'>('live');
   const [notifiedMatches, setNotifiedMatches] = useState<string[]>([]);
   const [refreshCount, setRefreshCount] = useState(0);
   
-  // Use Ref to track IDs to avoid state dependency loops in effect
+  // Use Ref to track IDs to avoid duplicates without triggering re-renders loop
   const loadedIds = useRef(new Set<string>());
 
   const fetchSportData = useCallback(async (mounted: boolean) => {
@@ -232,37 +232,34 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
                         const combined = [...prev, ...newItems];
                         return combined.sort((a, b) => a.date - b.date);
                     });
-                    setLoading(false);
                 }
             } catch (e) {
                 console.warn(`Failed to load ${sport}`, e);
             }
         };
 
-        // Prioritize Football
-        await fetchSport('football');
-
-        // Parallel fetch for others
-        const others = SPORTS_CATEGORIES.filter(s => s !== 'football');
-        await Promise.allSettled(others.map(sport => fetchSport(sport)));
-
-        // If we finished everything and still have no matches, stop loading
-        if (mounted) setLoading(false);
+        // Fire all requests concurrently
+        const promises = SPORTS_CATEGORIES.map(sport => fetchSport(sport));
+        
+        // Wait for all to finish (settled) to turn off loading indicator completely
+        await Promise.allSettled(promises);
+        
+        if (mounted) setIsFetching(false);
   }, []);
 
   useEffect(() => {
     let mounted = true;
     loadedIds.current.clear();
     setMatches([]);
-    setLoading(true);
+    setIsFetching(true);
 
     fetchSportData(mounted);
     
     return () => { mounted = false; };
   }, [refreshCount, fetchSportData]);
 
-  // Filtering & Logic
-  const { liveMatches, upcomingMatches } = useMemo(() => {
+  // Filtering Logic
+  const { liveMatches, upcomingMatches, hasResults } = useMemo(() => {
     const now = Date.now();
     const endOfDay = new Date();
     endOfDay.setHours(23, 59, 59, 999);
@@ -278,15 +275,17 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
         const query = searchQuery.toLowerCase();
         filtered = filtered.filter(m => 
             m.title.toLowerCase().includes(query) ||
-            m.league?.toLowerCase().includes(query) ||
-            m.teams?.home.name.toLowerCase().includes(query) ||
-            m.teams?.away.name.toLowerCase().includes(query)
+            (m.league && m.league.toLowerCase().includes(query)) ||
+            (m.teams?.home.name.toLowerCase().includes(query)) ||
+            (m.teams?.away.name.toLowerCase().includes(query))
         );
     }
 
     // 3. Sort priority
     filtered.sort((a, b) => {
+        // Popular first
         if (a.popular !== b.popular) return a.popular ? -1 : 1;
+        // Then by date
         return a.date - b.date;
     });
 
@@ -307,7 +306,9 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
         }
     }
 
-    return { liveMatches: live, upcomingMatches: upcoming };
+    const hasResults = live.length > 0 || upcoming.length > 0;
+
+    return { liveMatches: live, upcomingMatches: upcoming, hasResults };
   }, [matches, activeCategory, searchQuery]);
 
   const categories = useMemo(() => {
@@ -357,6 +358,12 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
       setRefreshCount(prev => prev + 1);
   };
 
+  // If fetching is done and no matches at all, show empty state
+  const showEmptyState = !isFetching && matches.length === 0;
+
+  // If fetching is done, matches exist, but filters show nothing
+  const showFilteredEmptyState = !isFetching && matches.length > 0 && !hasResults;
+
   return (
     <div className="max-w-7xl mx-auto px-2 py-4 min-h-screen animate-fade-in">
       <div className="flex flex-col gap-4 mb-4">
@@ -384,8 +391,9 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
             </div>
         </div>
         
-        <div className="flex items-center justify-between gap-2 overflow-x-auto no-scrollbar w-full">
-            <div className="flex items-center gap-1.5">
+        <div className="flex flex-col gap-3">
+            {/* Category Pills */}
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar w-full pb-1">
                 <Filter className="w-3 h-3 text-[var(--text-muted)] shrink-0" />
                 {categories.map(cat => (
                     <button
@@ -401,102 +409,123 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
                     </button>
                 ))}
             </div>
-            
-            {/* Show Upcoming Toggle */}
-            <button 
-                onClick={() => setShowUpcoming(!showUpcoming)}
-                className={`shrink-0 px-3 py-1 rounded-full text-[10px] font-bold flex items-center gap-1.5 transition-colors border ${
-                    showUpcoming 
-                    ? 'bg-[var(--text-main)] text-[var(--bg-main)] border-transparent' 
-                    : 'bg-transparent text-[var(--text-muted)] border-[var(--border-color)] hover:text-[var(--text-main)]'
-                }`}
-            >
-                <Calendar className="w-3 h-3" />
-                {showUpcoming ? 'Hide Upcoming' : 'Show Upcoming'}
-            </button>
+
+            {/* View Mode Tabs */}
+            <div className="flex bg-[var(--bg-card)] p-1 rounded-lg border border-[var(--border-color)] self-start">
+                 <button 
+                    onClick={() => setViewMode('live')}
+                    className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-[10px] font-bold transition-all ${
+                        viewMode === 'live' 
+                        ? 'bg-[rgb(var(--primary-color))] text-white shadow-md' 
+                        : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
+                    }`}
+                 >
+                    <Zap className={`w-3 h-3 ${viewMode === 'live' ? 'fill-current' : ''}`} />
+                    Live ({liveMatches.length})
+                 </button>
+                 <button 
+                    onClick={() => setViewMode('upcoming')}
+                    className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-[10px] font-bold transition-all ${
+                        viewMode === 'upcoming' 
+                        ? 'bg-[rgb(var(--primary-color))] text-white shadow-md' 
+                        : 'text-[var(--text-muted)] hover:text-[var(--text-main)]'
+                    }`}
+                 >
+                    <Calendar className="w-3 h-3" />
+                    Upcoming ({upcomingMatches.length})
+                 </button>
+            </div>
         </div>
       </div>
 
-      {loading && matches.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-32">
-            <Loader2 className="w-8 h-8 text-blue-500 animate-spin mb-2" />
-            <p className="text-[var(--text-muted)] text-[10px] font-mono animate-pulse">LOADING EVENTS...</p>
-        </div>
-      ) : matches.length === 0 ? (
-         <div className="flex flex-col items-center justify-center py-20 text-[var(--text-muted)] bg-[var(--bg-card)] rounded-xl border border-[var(--border-color)] border-dashed">
-            <Trophy className="w-10 h-10 mb-2 opacity-20" />
-            <p className="text-sm font-medium mb-4">No matches found.</p>
-            <button 
-                onClick={handleRetry}
-                className="flex items-center gap-2 px-4 py-2 bg-[var(--bg-input)] hover:bg-[var(--bg-hover)] rounded-lg text-xs font-bold transition-colors"
-            >
-                <RefreshCw className="w-3 h-3" /> Retry
-            </button>
-         </div>
-      ) : (
-         <div className="space-y-6">
-            {/* Live Section */}
-            <div>
-                <div className="flex items-center gap-2 mb-2 px-1">
-                    <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse"></div>
-                    <h3 className="text-sm font-bold text-[var(--text-main)]">Live Now</h3>
-                    <span className="text-[9px] font-bold text-[var(--text-muted)] bg-[var(--bg-card)] px-1.5 py-0.5 rounded-full border border-[var(--border-color)]">
-                        {liveMatches.length}
-                    </span>
-                </div>
-                
-                {liveMatches.length > 0 ? (
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2" style={{ contentVisibility: 'auto' }}>
-                        {liveMatches.map((match) => (
-                            <MatchCard 
-                                key={match.id} 
-                                match={match} 
-                                isLive={true} 
-                                onPlay={onPlay} 
-                                onNotify={handleNotify}
-                                isNotified={notifiedMatches.includes(match.title)}
-                            />
-                        ))}
-                    </div>
-                ) : (
-                    <div className="text-center py-8 bg-[var(--bg-card)]/50 rounded-lg border border-[var(--border-color)] border-dashed">
-                        <p className="text-xs text-[var(--text-muted)]">No live matches at the moment.</p>
+      {/* Main Content Area */}
+      <div className="min-h-[50vh]">
+          {showEmptyState ? (
+             <div className="flex flex-col items-center justify-center py-20 text-[var(--text-muted)] bg-[var(--bg-card)] rounded-xl border border-[var(--border-color)] border-dashed animate-fade-in">
+                <Trophy className="w-10 h-10 mb-2 opacity-20" />
+                <p className="text-sm font-medium mb-4">No matches found.</p>
+                <button 
+                    onClick={handleRetry}
+                    className="flex items-center gap-2 px-4 py-2 bg-[var(--bg-input)] hover:bg-[var(--bg-hover)] rounded-lg text-xs font-bold transition-colors"
+                >
+                    <RefreshCw className="w-3 h-3" /> Retry
+                </button>
+             </div>
+          ) : showFilteredEmptyState ? (
+             <div className="flex flex-col items-center justify-center py-20 text-[var(--text-muted)]">
+                <Search className="w-8 h-8 mb-2 opacity-20" />
+                <p className="text-xs">No matches match your filters.</p>
+             </div>
+          ) : (
+             <>
+                {/* LIVE VIEW */}
+                {viewMode === 'live' && (
+                    <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
+                        {liveMatches.length > 0 ? (
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2" style={{ contentVisibility: 'auto' }}>
+                                {liveMatches.map((match) => (
+                                    <MatchCard 
+                                        key={match.id} 
+                                        match={match} 
+                                        isLive={true} 
+                                        onPlay={onPlay} 
+                                        onNotify={handleNotify}
+                                        isNotified={notifiedMatches.includes(match.title)}
+                                    />
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="text-center py-12 bg-[var(--bg-card)]/50 rounded-lg border border-[var(--border-color)] border-dashed">
+                                <Zap className="w-8 h-8 mx-auto text-[var(--text-muted)] opacity-20 mb-2" />
+                                <p className="text-xs text-[var(--text-muted)]">No live matches at the moment.</p>
+                                <p className="text-[9px] text-[var(--text-muted)] mt-1">Check the Upcoming tab for today's schedule.</p>
+                            </div>
+                        )}
                     </div>
                 )}
-            </div>
 
-            {/* Upcoming Section */}
-            {showUpcoming && (
-                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                     <div className="flex items-center gap-2 mb-2 px-1 mt-6 pt-4 border-t border-[var(--border-color)]">
-                        <Clock className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-                        <h3 className="text-sm font-bold text-[var(--text-main)]">Today's Schedule</h3>
-                        <span className="text-[9px] font-bold text-[var(--text-muted)] bg-[var(--bg-card)] px-1.5 py-0.5 rounded-full border border-[var(--border-color)]">
-                            {upcomingMatches.length}
-                        </span>
+                {/* UPCOMING VIEW */}
+                {viewMode === 'upcoming' && (
+                     <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
+                        {upcomingMatches.length > 0 ? (
+                             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2" style={{ contentVisibility: 'auto' }}>
+                                {upcomingMatches.map((match) => (
+                                     <MatchCard 
+                                        key={match.id} 
+                                        match={match} 
+                                        isLive={false} 
+                                        onPlay={onPlay} 
+                                        onNotify={handleNotify}
+                                        isNotified={notifiedMatches.includes(match.title)}
+                                     />
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="text-center py-12 bg-[var(--bg-card)]/50 rounded-lg border border-[var(--border-color)] border-dashed">
+                                 <Calendar className="w-8 h-8 mx-auto text-[var(--text-muted)] opacity-20 mb-2" />
+                                 <p className="text-xs text-[var(--text-muted)]">No more matches scheduled for today.</p>
+                            </div>
+                        )}
                     </div>
-                    {upcomingMatches.length > 0 ? (
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2" style={{ contentVisibility: 'auto' }}>
-                            {upcomingMatches.map((match) => (
-                                 <MatchCard 
-                                    key={match.id} 
-                                    match={match} 
-                                    isLive={false} 
-                                    onPlay={onPlay} 
-                                    onNotify={handleNotify}
-                                    isNotified={notifiedMatches.includes(match.title)}
-                                 />
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="text-center py-8 bg-[var(--bg-card)]/50 rounded-lg border border-[var(--border-color)] border-dashed">
-                             <p className="text-xs text-[var(--text-muted)]">No more matches scheduled for today.</p>
-                        </div>
-                    )}
-                </div>
-            )}
-         </div>
-      )}
+                )}
+                
+                {/* Loading Indicator (Bottom) - Only show if still fetching but we have some content already */}
+                {isFetching && matches.length > 0 && (
+                    <div className="flex justify-center py-4">
+                        <Loader2 className="w-5 h-5 text-[rgb(var(--primary-color))] animate-spin" />
+                    </div>
+                )}
+
+                {/* Full Page Loader - Only show if fetching and NO content yet */}
+                {isFetching && matches.length === 0 && (
+                    <div className="flex flex-col items-center justify-center py-32">
+                        <Loader2 className="w-8 h-8 text-[rgb(var(--primary-color))] animate-spin mb-2" />
+                        <p className="text-[var(--text-muted)] text-[10px] font-mono animate-pulse">LOADING EVENTS...</p>
+                    </div>
+                )}
+             </>
+          )}
+      </div>
     </div>
   );
 };

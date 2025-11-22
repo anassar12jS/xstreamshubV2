@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Trophy, Calendar, PlayCircle, Clock, Zap, Loader2, Filter, Bell, BellRing, RadioReceiver } from 'lucide-react';
+import { Trophy, Calendar, PlayCircle, Bell, BellRing, RadioReceiver, Loader2, Filter, Search, RefreshCw, Clock } from 'lucide-react';
 import { getMatches, SPORTS_CATEGORIES } from '../services/sports';
 import { SportsMatch } from '../types';
 
@@ -54,7 +54,7 @@ const TeamLogo: React.FC<{ name: string, logo?: string, className?: string }> = 
     );
 });
 
-// Extracted MatchCard component to prevent re-creation on every render (CRITICAL FOR PERFORMANCE)
+// Extracted MatchCard component
 const MatchCard: React.FC<{ 
     match: SportsMatch, 
     isLive: boolean, 
@@ -208,18 +208,15 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
   const [matches, setMatches] = useState<SportsMatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showUpcoming, setShowUpcoming] = useState(false);
   const [notifiedMatches, setNotifiedMatches] = useState<string[]>([]);
+  const [refreshCount, setRefreshCount] = useState(0);
   
   // Use Ref to track IDs to avoid state dependency loops in effect
   const loadedIds = useRef(new Set<string>());
 
-  useEffect(() => {
-    let mounted = true;
-    loadedIds.current.clear();
-    setMatches([]);
-    setLoading(true);
-
-    const loadAllSports = async () => {
+  const fetchSportData = useCallback(async (mounted: boolean) => {
         const fetchSport = async (sport: string) => {
             if (!mounted) return;
             try {
@@ -228,14 +225,11 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
                 
                 if (data && data.length > 0) {
                     setMatches(prev => {
-                        // Optimized merge: only add new items, minimal re-sort
                         const newItems = data.filter(m => !loadedIds.current.has(m.id));
                         if (newItems.length === 0) return prev;
                         
                         newItems.forEach(m => loadedIds.current.add(m.id));
                         const combined = [...prev, ...newItems];
-                        // Sort is somewhat expensive, but necessary. 
-                        // Reducing object creation in mapMatch (in service) helps here.
                         return combined.sort((a, b) => a.date - b.date);
                     });
                     setLoading(false);
@@ -246,35 +240,51 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
         };
 
         // Prioritize Football
-        fetchSport('football');
+        await fetchSport('football');
 
         // Parallel fetch for others
         const others = SPORTS_CATEGORIES.filter(s => s !== 'football');
-        others.forEach(sport => fetchSport(sport));
+        await Promise.allSettled(others.map(sport => fetchSport(sport)));
 
-        setTimeout(() => {
-            if (mounted) setLoading(false);
-        }, 4000);
-    };
+        // If we finished everything and still have no matches, stop loading
+        if (mounted) setLoading(false);
+  }, []);
 
-    loadAllSports();
+  useEffect(() => {
+    let mounted = true;
+    loadedIds.current.clear();
+    setMatches([]);
+    setLoading(true);
+
+    fetchSportData(mounted);
     
     return () => { mounted = false; };
-  }, []);
+  }, [refreshCount, fetchSportData]);
 
   // Filtering & Logic
   const { liveMatches, upcomingMatches } = useMemo(() => {
     const now = Date.now();
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+    const endOfDayTime = endOfDay.getTime();
     
-    // 1. Filter
+    // 1. Filter by Category
     let filtered = activeCategory === 'ALL' 
         ? matches 
         : matches.filter(m => m.category.toUpperCase() === activeCategory);
 
-    // 2. Sort priority
-    // Only sort if filtering changed to avoid re-sorting same array ref
-    // But since we filtered, we have a new array anyway.
-    // Optimization: Use simple sort comparator
+    // 2. Filter by Search
+    if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        filtered = filtered.filter(m => 
+            m.title.toLowerCase().includes(query) ||
+            m.league?.toLowerCase().includes(query) ||
+            m.teams?.home.name.toLowerCase().includes(query) ||
+            m.teams?.away.name.toLowerCase().includes(query)
+        );
+    }
+
+    // 3. Sort priority
     filtered.sort((a, b) => {
         if (a.popular !== b.popular) return a.popular ? -1 : 1;
         return a.date - b.date;
@@ -291,13 +301,14 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
 
         if (isLiveStatus || isLiveTime) {
             live.push(m);
-        } else if (diff >= 15 * 60 * 1000) {
+        } else if (diff >= 15 * 60 * 1000 && m.date <= endOfDayTime) {
+            // Only add to upcoming if it is TODAY (before midnight)
             upcoming.push(m);
         }
     }
 
     return { liveMatches: live, upcomingMatches: upcoming };
-  }, [matches, activeCategory]);
+  }, [matches, activeCategory, searchQuery]);
 
   const categories = useMemo(() => {
     const cats = Array.from(new Set(matches.map(m => m.category.toUpperCase()))) as string[];
@@ -342,20 +353,38 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
       }
   }, []);
 
+  const handleRetry = () => {
+      setRefreshCount(prev => prev + 1);
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-2 py-4 min-h-screen animate-fade-in">
-      <div className="flex flex-col md:flex-row items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-2 w-full md:w-auto">
-            <div className="bg-blue-600 p-1.5 rounded-lg shadow-lg shadow-blue-900/20 shrink-0">
-               <Trophy className="w-4 h-4 text-white" />
+      <div className="flex flex-col gap-4 mb-4">
+        <div className="flex flex-col md:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-2 w-full md:w-auto">
+                <div className="bg-blue-600 p-1.5 rounded-lg shadow-lg shadow-blue-900/20 shrink-0">
+                <Trophy className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                    <h2 className="text-lg font-black text-[var(--text-main)] tracking-tight uppercase italic leading-none">Live Sports</h2>
+                    <p className="text-[9px] text-[var(--text-muted)] font-medium">Real-time events dashboard</p>
+                </div>
             </div>
-            <div>
-                <h2 className="text-lg font-black text-[var(--text-main)] tracking-tight uppercase italic leading-none">Live Sports</h2>
-                <p className="text-[9px] text-[var(--text-muted)] font-medium">Real-time events dashboard</p>
+            
+            {/* Search Bar */}
+            <div className="w-full md:w-auto flex-1 max-w-md relative">
+                <input 
+                    type="text" 
+                    placeholder="Search teams, leagues..." 
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-[var(--bg-input)] border border-[var(--border-color)] rounded-full py-1.5 pl-9 pr-4 text-xs text-[var(--text-main)] focus:outline-none focus:border-[rgb(var(--primary-color))]"
+                />
+                <Search className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-3 top-2" />
             </div>
         </div>
         
-        <div className="w-full md:w-auto overflow-x-auto no-scrollbar">
+        <div className="flex items-center justify-between gap-2 overflow-x-auto no-scrollbar w-full">
             <div className="flex items-center gap-1.5">
                 <Filter className="w-3 h-3 text-[var(--text-muted)] shrink-0" />
                 {categories.map(cat => (
@@ -372,6 +401,19 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
                     </button>
                 ))}
             </div>
+            
+            {/* Show Upcoming Toggle */}
+            <button 
+                onClick={() => setShowUpcoming(!showUpcoming)}
+                className={`shrink-0 px-3 py-1 rounded-full text-[10px] font-bold flex items-center gap-1.5 transition-colors border ${
+                    showUpcoming 
+                    ? 'bg-[var(--text-main)] text-[var(--bg-main)] border-transparent' 
+                    : 'bg-transparent text-[var(--text-muted)] border-[var(--border-color)] hover:text-[var(--text-main)]'
+                }`}
+            >
+                <Calendar className="w-3 h-3" />
+                {showUpcoming ? 'Hide Upcoming' : 'Show Upcoming'}
+            </button>
         </div>
       </div>
 
@@ -381,22 +423,29 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
             <p className="text-[var(--text-muted)] text-[10px] font-mono animate-pulse">LOADING EVENTS...</p>
         </div>
       ) : matches.length === 0 ? (
-         <div className="text-center py-20 text-[var(--text-muted)] bg-[var(--bg-card)] rounded-xl border border-[var(--border-color)] border-dashed">
-            <Trophy className="w-10 h-10 mx-auto mb-2 opacity-20" />
-            <p className="text-sm">No matches found.</p>
+         <div className="flex flex-col items-center justify-center py-20 text-[var(--text-muted)] bg-[var(--bg-card)] rounded-xl border border-[var(--border-color)] border-dashed">
+            <Trophy className="w-10 h-10 mb-2 opacity-20" />
+            <p className="text-sm font-medium mb-4">No matches found.</p>
+            <button 
+                onClick={handleRetry}
+                className="flex items-center gap-2 px-4 py-2 bg-[var(--bg-input)] hover:bg-[var(--bg-hover)] rounded-lg text-xs font-bold transition-colors"
+            >
+                <RefreshCw className="w-3 h-3" /> Retry
+            </button>
          </div>
       ) : (
          <div className="space-y-6">
-            {liveMatches.length > 0 && (
-                <div>
-                    <div className="flex items-center gap-2 mb-2 px-1">
-                        <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse"></div>
-                        <h3 className="text-sm font-bold text-[var(--text-main)]">Live Now</h3>
-                        <span className="text-[9px] font-bold text-[var(--text-muted)] bg-[var(--bg-card)] px-1.5 py-0.5 rounded-full border border-[var(--border-color)]">
-                            {liveMatches.length}
-                        </span>
-                    </div>
-                    {/* Content Visibility Auto improves rendering performance for large lists */}
+            {/* Live Section */}
+            <div>
+                <div className="flex items-center gap-2 mb-2 px-1">
+                    <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse"></div>
+                    <h3 className="text-sm font-bold text-[var(--text-main)]">Live Now</h3>
+                    <span className="text-[9px] font-bold text-[var(--text-muted)] bg-[var(--bg-card)] px-1.5 py-0.5 rounded-full border border-[var(--border-color)]">
+                        {liveMatches.length}
+                    </span>
+                </div>
+                
+                {liveMatches.length > 0 ? (
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2" style={{ contentVisibility: 'auto' }}>
                         {liveMatches.map((match) => (
                             <MatchCard 
@@ -409,30 +458,41 @@ export const Sports: React.FC<SportsProps> = ({ onPlay }) => {
                             />
                         ))}
                     </div>
-                </div>
-            )}
+                ) : (
+                    <div className="text-center py-8 bg-[var(--bg-card)]/50 rounded-lg border border-[var(--border-color)] border-dashed">
+                        <p className="text-xs text-[var(--text-muted)]">No live matches at the moment.</p>
+                    </div>
+                )}
+            </div>
 
-            {upcomingMatches.length > 0 && (
-                <div>
+            {/* Upcoming Section */}
+            {showUpcoming && (
+                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                      <div className="flex items-center gap-2 mb-2 px-1 mt-6 pt-4 border-t border-[var(--border-color)]">
-                        <Calendar className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-                        <h3 className="text-sm font-bold text-[var(--text-main)]">Upcoming</h3>
+                        <Clock className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                        <h3 className="text-sm font-bold text-[var(--text-main)]">Today's Schedule</h3>
                         <span className="text-[9px] font-bold text-[var(--text-muted)] bg-[var(--bg-card)] px-1.5 py-0.5 rounded-full border border-[var(--border-color)]">
                             {upcomingMatches.length}
                         </span>
                     </div>
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2" style={{ contentVisibility: 'auto' }}>
-                        {upcomingMatches.map((match) => (
-                             <MatchCard 
-                                key={match.id} 
-                                match={match} 
-                                isLive={false} 
-                                onPlay={onPlay} 
-                                onNotify={handleNotify}
-                                isNotified={notifiedMatches.includes(match.title)}
-                             />
-                        ))}
-                    </div>
+                    {upcomingMatches.length > 0 ? (
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2" style={{ contentVisibility: 'auto' }}>
+                            {upcomingMatches.map((match) => (
+                                 <MatchCard 
+                                    key={match.id} 
+                                    match={match} 
+                                    isLive={false} 
+                                    onPlay={onPlay} 
+                                    onNotify={handleNotify}
+                                    isNotified={notifiedMatches.includes(match.title)}
+                                 />
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="text-center py-8 bg-[var(--bg-card)]/50 rounded-lg border border-[var(--border-color)] border-dashed">
+                             <p className="text-xs text-[var(--text-muted)]">No more matches scheduled for today.</p>
+                        </div>
+                    )}
                 </div>
             )}
          </div>

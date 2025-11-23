@@ -165,8 +165,8 @@ export const Details: React.FC<DetailsProps> = ({ item, onBack, onPersonClick, o
  switch (server) {
       case 'vidsrc-wtf':
         return item.media_type === MediaType.MOVIE
-          ? `https://vidsrc.xyz/embed/movie/${tmdbId}`
-          : `https://vidsrc.xyz/embed/tv/${tmdbId}/${s}-${e}`;
+          ? `https://vidsrc.wtf/api/2/movie/${tmdbId}`
+          : `https://vidsrc.wtf/api/2/tv/${tmdbId}/${s}-${e}`;
       case 'vidsrc-cc':
          const vidsrcCcId = imdbId || tmdbId;
         return item.media_type === MediaType.MOVIE
@@ -240,6 +240,7 @@ export const Details: React.FC<DetailsProps> = ({ item, onBack, onPersonClick, o
 
   const backdropUrl = detail.backdrop_path ? `${TMDB_IMAGE_BASE}${detail.backdrop_path}` : '';
   const posterUrl = detail.poster_path ? `${TMDB_POSTER_BASE}${detail.poster_path}` : 'https://via.placeholder.com/500x750?text=No+Poster';
+  const rating = detail.vote_average !== undefined ? detail.vote_average : 0;
 
   const servers = [
       { id: 'vidsrc-wtf', label: 'VidSrc WTF', icon: Zap, badge: 'Fastest' },
@@ -291,7 +292,7 @@ export const Details: React.FC<DetailsProps> = ({ item, onBack, onPersonClick, o
                          <h1 className="text-2xl font-bold text-[var(--text-main)] leading-tight">{detail.title || detail.name}</h1>
                          <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
                             <Star className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500" />
-                            <span className="text-[var(--text-main)]">{detail.vote_average.toFixed(1)}</span>
+                            <span className="text-[var(--text-main)]">{rating.toFixed(1)}</span>
                             <span>•</span>
                             <span>{detail.release_date?.split('-')[0] || 'N/A'}</span>
                          </div>
@@ -304,7 +305,7 @@ export const Details: React.FC<DetailsProps> = ({ item, onBack, onPersonClick, o
                 <div className="hidden lg:block mb-6">
                     <h1 className="text-5xl font-bold text-[var(--text-main)] mb-4 tracking-tight">{detail.title || detail.name}</h1>
                     <div className="flex items-center gap-4 text-[var(--text-muted)] text-base">
-                        <span className="flex items-center gap-1 text-[var(--text-main)] font-bold"><Star className="w-4 h-4 text-yellow-500 fill-yellow-500" /> {detail.vote_average.toFixed(1)}</span>
+                        <span className="flex items-center gap-1 text-[var(--text-main)] font-bold"><Star className="w-4 h-4 text-yellow-500 fill-yellow-500" /> {rating.toFixed(1)}</span>
                         <span>{detail.release_date || detail.first_air_date}</span>
                         {detail.runtime && <span>{detail.runtime} min</span>}
                         <div className="flex gap-2 ml-2">
